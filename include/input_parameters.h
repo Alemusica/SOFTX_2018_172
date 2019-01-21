@@ -18,7 +18,7 @@
 
 #include <deal.II/grid/grid_generator.h>
 #include <deal.II/grid/grid_tools.h>
-
+#include <deal.II/grid/manifold_lib.h>
 #include "parameters.h"
 #include "utilities.h"
 
@@ -81,10 +81,49 @@ namespace HDG_WE
 
         break;
       }
+      case 2:
+      {
+        Triangulation<dim> tria1, tria2;
+        GridGenerator::hyper_shell(tria1, Point<dim>(), 0.4, std::sqrt(3), 6);
+        GridGenerator::hyper_ball(tria2, Point<dim>(), 0.4);
+        GridGenerator::merge_triangulations(tria1, tria2, tria);
+        tria.set_all_manifold_ids(0);
+        for (typename Triangulation<dim>::cell_iterator cell = tria.begin();
+             cell != tria.end(); ++cell)
+          {
+            for (unsigned int f=0; f<GeometryInfo<dim>::faces_per_cell; ++f)
+              {
+                bool face_at_sphere_boundary = true;
+                for (unsigned int v=0; v<GeometryInfo<dim-1>::vertices_per_cell; ++v)
+                  if (std::abs(cell->face(f)->vertex(v).norm()-0.4) > 1e-12)
+                    face_at_sphere_boundary = false;
+                if (face_at_sphere_boundary)
+                  cell->face(f)->set_all_manifold_ids(1);
+              }
+            if (cell->center().norm() > 0.4)
+              cell->set_material_id(1);
+            else
+              cell->set_material_id(0);
+          }
+        const SphericalManifold<dim> spherical_manifold;
+        tria.set_manifold(1, spherical_manifold);
+        TransfiniteInterpolationManifold<dim> transfinite_manifold;
+        transfinite_manifold.initialize(tria);
+        tria.set_manifold(0, transfinite_manifold);
+
+        typename Triangulation<dim>::active_cell_iterator cell = tria.begin_active(),endc = tria.end();
+        for (; cell!=endc; ++cell)
+          for (unsigned f=0; f<GeometryInfo<dim>::faces_per_cell; ++f)
+            if (cell->face(f)->at_boundary())
+              cell->face(f)->set_boundary_id(1);
+
+        break;
+      }
       default:
         Assert(false,ExcNotImplemented());
       }
     tria.refine_global(parameters.n_refinements);
+    tria.set_manifold(0, FlatManifold<dim>());
   }
 
 
@@ -119,6 +158,14 @@ namespace HDG_WE
             return_value *= std::sin(membrane_modes*numbers::PI*p(d));
           else
             return_value *= std::cos(membrane_modes*numbers::PI*p(d));
+        break;
+      }
+      case 2:
+      {
+        const double fact = 500.0;
+        if(component == dim)
+          return_value = std::sqrt(fact*fact*fact/(8*numbers::PI*numbers::PI*numbers::PI)) *
+                         std::exp(-fact*((p[0]-0.6)*(p[0]-0.6)+(p[1]-0.6)*(p[1]-0.6)+(p[2]-0.6)*(p[2]-0.6)));
         break;
       }
       default:
